@@ -3,6 +3,7 @@
 from __future__ import unicode_literals
 
 import os
+import socket
 import click
 import subprocess
 import ftplib
@@ -21,56 +22,64 @@ def _debug_process_params(debug=False):
     return {}
 
 
-def create_directories():
+def _create_directories():
     directories = ['cache', 'conf', 'data', 'repo', 'tmp', 'logs']
     for directory in directories:
         if not os.path.exists(directory):
             os.makedirs(directory)
 
-    message = click.style('Success', fg='green')
-    click.echo('Create directories ... {}'.format(message))
+    click.echo('Create directories ... {}'.format(
+        click.style('Success', fg='green')
+    ))
 
 
-def clone_project(repo_path, project_name, debug=False):
+def _clone_project(repo_path, project_name, debug=False):
+    click.echo('Clone repo ... ', nl=False)
+
     if not os.path.exists(os.path.join(repo_path, '.git')):
-        click.echo('Clone repo ...')
         subprocess.check_call(
             ['git', 'clone', 'https://factory.ailove.ru/git/{}/'.format(project_name), repo_path],
             **_debug_process_params(debug)
         )
-        message = click.style('Success', fg='green')
+        click.secho('Success', fg='green')
     else:
-        message = click.style('Already exists', fg='yellow')
-    click.echo('Clone repo ... {}'.format(message))
+        click.secho('Already exists', fg='yellow')
 
 
-def create_virtualenv(python_path, debug=False):
+def _create_virtualenv(python_path, debug=False):
+    click.echo('Create virtualenv ... ', nl=False)
+
     if not os.path.exists(os.path.join(python_path, 'bin', 'python')):
         subprocess.check_call(
             ['virtualenv', 'python'],
             **_debug_process_params(debug)
         )
-        message = click.style('Success', fg='green')
+        click.secho('Success', fg='green')
     else:
-        message = click.style('Already exists', fg='yellow')
-    click.echo('Create virtualenv ... {}'.format(message))
+        click.secho('Already exists', fg='yellow')
 
 
-def install_packages(python_path, repo_path, debug=False):
+def _install_packages(python_path, repo_path, debug=False):
+    click.echo('Install python requirements ... ', nl=False)
+
     pip = os.path.join(python_path, 'bin', 'pip')
+
     if not os.path.exists(pip):
-        click.echo(click.style('Please install PIP', fg='red'))
+        click.secho('Error: Please install PIP', fg='red')
     else:
-        click.echo('Install python requirements ...')
         subprocess.check_call(
             [pip, 'install', '-r', os.path.join(repo_path, 'requirements.txt')],
             **_debug_process_params(debug)
         )
-        click.echo('Install python requirements ... {}'.format(click.style('Success', fg='green')))
+        click.secho('Success', fg='green')
 
 
-def download_conf(project_name, username, password):
-    message = click.style('Success', fg='green')
+def _download_conf(project_name, username, password):
+    click.echo('Get settings ... ', nl=False)
+
+    if not os.path.exists('conf'):
+        os.mkdir('conf')
+
     try:
         ftp = ftplib.FTP(
             '{}.dev.ailove.ru'.format(project_name),
@@ -78,18 +87,40 @@ def download_conf(project_name, username, password):
             password
         )
         ftp.cwd('conf')
-        with open('conf/database', 'wb') as fhandle:
-            ftp.retrbinary('RETR ' + 'database', fhandle.write)
 
-        for line in fileinput.input('conf/database', inplace=True):
-            print(line.replace('localhost', '{}.dev.ailove.ru'.format(project_name))),
-    except IOError:
-        message = click.style('File does not exists', fg='reg')
-    except ftplib.error_perm:
-        message = click.style('Login/Password incorrect', fg='red')
+        for conf in ('database', 'memcache', 'redis'):
+            if conf in ftp.nlst():
+                with open('conf/{}'.format(conf), 'wb') as fhandle:
+                    ftp.retrbinary('RETR ' + conf, fhandle.write)
 
-    click.echo('Create database connect ... {}'.format(message))
+                for line in fileinput.input('conf/{}'.format(conf), inplace=True):
+                    print(line.replace('localhost', '{}.dev.ailove.ru'.format(project_name))),
 
+        click.secho('Success', fg='green')
+    except ftplib.error_perm as e:
+        click.secho('Error: {}'.format(e.message), fg='red')
+    except socket.error as e:
+        click.secho('Error: {}'.format(e.message), fg='red')
+
+
+def _download_static(project_name, username, password, debug=False):
+    click.echo('Download static ... ', nl=False)
+    try:
+        subprocess.check_call(
+            [
+                'wget1',
+                '--mirror', 'ftp://{}.dev.ailove.ru/data/static/'.format(project_name),
+                '--user', '{}@{}'.format(username, project_name),
+                '--password', password,
+                '-nH',
+            ],
+            **_debug_process_params(debug)
+        )
+        click.secho('Success', fg='green')
+    except subprocess.CalledProcessError as e:
+        click.secho('Error', fg='red')
+    except OSError:
+        click.secho('Error: Please install wget', fg='red')
 
 @click.group()
 @click.option('--repo', envvar='REPO_PATH', default='repo/dev',
@@ -109,12 +140,12 @@ def cli(ctx, repo, python, debug):
 @cli.command()
 @click.pass_context
 def upgrade_packages(ctx):
-    install_packages(ctx.obj['PYTHON_PATH'], ctx.obj['REPO_PATH'], ctx.obj['DEBUG'])
+    _install_packages(ctx.obj['PYTHON_PATH'], ctx.obj['REPO_PATH'], ctx.obj['DEBUG'])
 
 
 @cli.command()
-@click.option('--project_name', prompt='Project name please')
-@click.option('--username', prompt='Your username please')
+@click.option('--project_name', prompt='Project name')
+@click.option('--username', prompt='Your username')
 @click.option('--password', prompt=True, hide_input=True)
 @click.pass_context
 def init(ctx, project_name, username, password):
@@ -122,11 +153,25 @@ def init(ctx, project_name, username, password):
         click.echo(click.style('Project already initial', fg='red'))
         return
 
-    create_directories()
-    clone_project(ctx.obj['REPO_PATH'], project_name, ctx.obj['DEBUG'])
-    create_virtualenv(ctx.obj['PYTHON_PATH'], ctx.obj['DEBUG'])
-    install_packages(ctx.obj['PYTHON_PATH'], ctx.obj['REPO_PATH'], ctx.obj['DEBUG'])
-    download_conf(project_name, username, password)
+    _create_directories()
+    _clone_project(ctx.obj['REPO_PATH'], project_name, ctx.obj['DEBUG'])
+    _create_virtualenv(ctx.obj['PYTHON_PATH'], ctx.obj['DEBUG'])
+    _install_packages(ctx.obj['PYTHON_PATH'], ctx.obj['REPO_PATH'], ctx.obj['DEBUG'])
+    _download_conf(project_name, username, password)
+
+    click.echo('Download static files? [y/n]')
+    c = click.getchar()
+    if c == 'y':
+        _download_static(project_name, username, password, ctx.obj['DEBUG'])
+
+
+@cli.command()
+@click.option('--project_name', prompt='Project name')
+@click.option('--username', prompt='Your username')
+@click.option('--password', prompt=True, hide_input=True)
+@click.pass_context
+def download_static(ctx, project_name, username, password):
+    _download_static(project_name, username, password, ctx.obj['DEBUG'])
 
 
 @cli.command()
