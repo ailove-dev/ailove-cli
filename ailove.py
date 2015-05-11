@@ -154,7 +154,3 @@ def start_server(ctx, host, port, autoreload):
         ],
         **_debug_process_params(ctx.obj['DEBUG'])
     )
-
-
-if __name__ == '__main__':
-    cli()
