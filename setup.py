@@ -12,6 +12,7 @@ setup(
     install_requires=[
         'click',
         'uwsgi',
+        'python-redmine'
     ],
     entry_points='''
         [console_scripts]

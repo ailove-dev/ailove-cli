@@ -8,12 +8,40 @@ import click
 import subprocess
 import ftplib
 import fileinput
+import ConfigParser
+from functools import wraps
+from redmine import Redmine, AuthError
 
 try:
     from subprocess import DEVNULL
 except ImportError:
     import os
     DEVNULL = open(os.devnull, 'wb')
+
+APP_NAME = 'AiLove CLI'
+
+
+def login_require(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        app_path = click.get_app_dir(APP_NAME, force_posix=True)
+        path_config = os.path.join(app_path, 'config.ini')
+
+        try:
+            config = ConfigParser.RawConfigParser()
+            config.read(path_config)
+
+            username = config.get('user', 'username')
+            password = config.get('user', 'password')
+
+            redmine = Redmine('https://factory.ailove.ru/',
+                              username=username, password=password)
+            redmine.auth()
+        except (AuthError, ConfigParser.NoSectionError, ConfigParser.NoOptionError, OSError):
+            raise click.ClickException(click.style('Login/Password incorrect\n'
+                                                   'Please use command: ailove login', fg='red'))
+        return f(*args, **kwargs)
+    return wrapper
 
 
 def _debug_process_params(debug=False):
@@ -33,12 +61,16 @@ def _create_directories():
     ))
 
 
-def _clone_project(repo_path, project_name, debug=False):
+def _clone_project(repo_path, project_name, username, password, debug=False):
     click.echo('Clone repo ... ', nl=False)
 
     if not os.path.exists(os.path.join(repo_path, '.git')):
         subprocess.check_call(
-            ['git', 'clone', 'https://factory.ailove.ru/git/{}/'.format(project_name), repo_path],
+            ['git', 'clone',
+             'https://{}:{}@factory.ailove.ru/git/{}/'.format(
+                 username, password, project_name
+             ),
+             repo_path],
             **_debug_process_params(debug)
         )
         click.secho('Success', fg='green')
@@ -108,7 +140,7 @@ def _download_static(project_name, username, password, debug=False):
     try:
         subprocess.check_call(
             [
-                'wget1',
+                'wget',
                 '--mirror', 'ftp://{}.dev.ailove.ru/data/static/'.format(project_name),
                 '--user', '{}@{}'.format(username, project_name),
                 '--password', password,
@@ -122,6 +154,7 @@ def _download_static(project_name, username, password, debug=False):
     except OSError:
         click.secho('Error: Please install wget', fg='red')
 
+
 @click.group()
 @click.option('--repo', envvar='REPO_PATH', default='repo/dev',
               metavar='PATH', help='Changes the repository folder location.')
@@ -130,11 +163,52 @@ def _download_static(project_name, username, password, debug=False):
 @click.option('--debug/--no-debug', default=False, envvar='DEBUG')
 @click.pass_context
 def cli(ctx, repo, python, debug):
+    app_path = click.get_app_dir(APP_NAME, force_posix=True)
+    path_config = os.path.join(app_path, 'config.ini')
+
+    try:
+        config = ConfigParser.RawConfigParser()
+        config.read(path_config)
+        username = config.get('user', 'username')
+        password = config.get('user', 'password')
+    except:
+        username = None
+        password = None
+
     ctx.obj = {
         'DEBUG': debug,
         'REPO_PATH': repo,
         'PYTHON_PATH': python,
+        'username': username,
+        'password': password
     }
+
+
+@cli.command()
+@click.option('--username', prompt='Your username')
+@click.option('--password', prompt=True, hide_input=True)
+def login(username, password):
+    try:
+        redmine = Redmine('https://factory.ailove.ru/',
+                          username=username, password=password)
+        redmine.auth()
+    except AuthError:
+        click.secho('Login/Password incorrect', fg='red')
+        return
+
+    app_path = click.get_app_dir(APP_NAME, force_posix=True)
+    if not os.path.exists(app_path):
+        os.makedirs(app_path)
+
+    config = ConfigParser.RawConfigParser()
+    path_config = os.path.join(app_path, 'config.ini')
+
+    config.add_section('user')
+    config.set('user', 'username', username)
+    config.set('user', 'password', password)
+
+    with open(path_config, 'wb') as configfile:
+        config.write(configfile)
 
 
 @cli.command()
@@ -145,33 +219,46 @@ def upgrade_packages(ctx):
 
 @cli.command()
 @click.option('--project_name', prompt='Project name')
-@click.option('--username', prompt='Your username')
-@click.option('--password', prompt=True, hide_input=True)
 @click.pass_context
-def init(ctx, project_name, username, password):
+@login_require
+def init(ctx, project_name):
     if os.path.exists(os.path.join(ctx.obj['REPO_PATH'], '.git')):
         click.echo(click.style('Project already initial', fg='red'))
         return
 
     _create_directories()
-    _clone_project(ctx.obj['REPO_PATH'], project_name, ctx.obj['DEBUG'])
-    _create_virtualenv(ctx.obj['PYTHON_PATH'], ctx.obj['DEBUG'])
-    _install_packages(ctx.obj['PYTHON_PATH'], ctx.obj['REPO_PATH'], ctx.obj['DEBUG'])
-    _download_conf(project_name, username, password)
+    _clone_project(ctx.obj['REPO_PATH'],
+                   project_name,
+                   ctx.obj['username'],
+                   ctx.obj['password'],
+                   ctx.obj['DEBUG'])
+    _create_virtualenv(ctx.obj['PYTHON_PATH'],
+                       ctx.obj['DEBUG'])
+    _install_packages(ctx.obj['PYTHON_PATH'],
+                      ctx.obj['REPO_PATH'],
+                      ctx.obj['DEBUG'])
+    _download_conf(project_name,
+                   ctx.obj['username'],
+                   ctx.obj['password'])
 
     click.echo('Download static files? [y/n]')
     c = click.getchar()
     if c == 'y':
-        _download_static(project_name, username, password, ctx.obj['DEBUG'])
+        _download_static(project_name,
+                         ctx.obj['username'],
+                         ctx.obj['password'],
+                         ctx.obj['DEBUG'])
 
 
 @cli.command()
 @click.option('--project_name', prompt='Project name')
-@click.option('--username', prompt='Your username')
-@click.option('--password', prompt=True, hide_input=True)
 @click.pass_context
-def download_static(ctx, project_name, username, password):
-    _download_static(project_name, username, password, ctx.obj['DEBUG'])
+@login_require
+def download_static(ctx, project_name):
+    _download_static(project_name,
+                     ctx.obj['username'],
+                     ctx.obj['password'],
+                     ctx.obj['DEBUG'])
 
 
 @cli.command()
