@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name='ailove-cli',
-    version='0.1',
+    version='0.2.1',
     url='https://github.com/ailove-dev/ailove-cli',
     license='MIT',
     author='Dmitriy Sokolov',

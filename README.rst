@@ -4,9 +4,7 @@ ailove-cli
 Unknown Enemy
 
 
-Installation
-------------
+Documentations
+--------------
 
-Install with ``pip``:
-
-Run ``pip install git+https://github.com/ailove-dev/ailove-cli.git``
+* `Russian <https://github.com/ailove-dev/ailove-cli/blob/master/docs/ru.rst>`_
