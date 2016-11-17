@@ -57,3 +57,11 @@
 Запустить Django сервер (находясь в папке проекта):
 
     $ ailove devserver
+
+
+Возможные проблемы
+__________________
+
+Если стоит несколько версий Python и нужно указать путь к нужному Python, а так же создать virtualenv
+
+    $ ailove init --python=PATH_TO_PYTHON --create-env

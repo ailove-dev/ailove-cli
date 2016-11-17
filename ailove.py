@@ -157,37 +157,63 @@ def _clone_project(repo_path, project_name, username, password, debug=False):
         click.secho('Already exists', fg='yellow')
 
 
-def _create_virtualenv(python_path, debug=False):
+def _create_virtualenv(python_path, debug=False, create_env=False):
     click.echo('Create virtualenv ... ', nl=False)
 
-    if not os.path.exists(os.path.join(python_path, 'bin', 'python')):
+    if not create_env:
+        if not os.path.exists(os.path.join(python_path, 'bin', 'python')):
+            run_process(
+                ['virtualenv', 'python'],
+                debug=debug
+            )
+            click.secho('Success', fg='green')
+        else:
+            click.secho('Already exists', fg='yellow')
+    else:
         run_process(
-            ['virtualenv', 'python'],
+            ['virtualenv', '-p', os.path.join(python_path, 'bin', 'python'), 'python'],
             debug=debug
         )
         click.secho('Success', fg='green')
-    else:
-        click.secho('Already exists', fg='yellow')
 
 
-def _install_packages(python_path, repo_path, debug=False):
+def _install_packages(python_path, repo_path, debug=False, create_env=False):
     click.echo('Install python requirements ... ', nl=False)
 
-    pip = os.path.join(python_path, 'bin', 'pip')
+    if not create_env:
+        #  if user did't require creating virtualenv
+        pip = os.path.join(python_path, 'bin', 'pip')
 
-    if not os.path.exists(pip):
-        click.secho('Error: Please install PIP.', fg='red')
+        if not os.path.exists(pip):
+            click.secho('Error: Please install PIP.', fg='red')
+        else:
+            run_process(
+                [pip, 'install', '-r', os.path.join(repo_path, 'requirements.txt')],
+                debug=debug
+            )
+            # set new hash
+            file_requirements = os.path.join(repo_path, 'requirements.txt')
+            current_hash = hashlib.sha256(open(file_requirements, 'rb').read()).hexdigest()
+            _set_config('cache', 'require_hash', current_hash)
+
+            click.secho('Success', fg='green')
     else:
-        run_process(
-            [pip, 'install', '-r', os.path.join(repo_path, 'requirements.txt')],
-            debug=debug
-        )
-        # set new hash
-        file_requirements = os.path.join(repo_path, 'requirements.txt')
-        current_hash = hashlib.sha256(open(file_requirements, 'rb').read()).hexdigest()
-        _set_config('cache', 'require_hash', current_hash)
+        # if user require creating virtualenv
+        pip = os.path.join('python', 'bin', 'pip')
 
-        click.secho('Success', fg='green')
+        if not os.path.exists(pip):
+            click.secho('Error: Please install PIP.', fg='red')
+        else:
+            run_process(
+                [pip, 'install', '-r', os.path.join(repo_path, 'requirements.txt')],
+                debug=debug
+            )
+            # set new hash
+            file_requirements = os.path.join(repo_path, 'requirements.txt')
+            current_hash = hashlib.sha256(open(file_requirements, 'rb').read()).hexdigest()
+            _set_config('cache', 'require_hash', current_hash)
+
+            click.secho('Success', fg='green')
 
 
 def _download_conf(project_name, username, password):
@@ -246,8 +272,10 @@ def _download_static(project_name, username, password, debug=False):
 @click.option('--python', envvar='PYTHON_PATH', default='python',
               metavar='PATH', help='Changes the python folder location.')
 @click.option('--debug/--no-debug', default=False, envvar='DEBUG')
+@click.option('--create-env/--no-create-env', default=False, envvar='CREATE_ENV',
+              help='Create virtualenv with python which path is supplied in --python argument')
 @click.pass_context
-def cli(ctx, repo, python, debug):
+def cli(ctx, repo, python, debug, create_env):
     app_path = click.get_app_dir(APP_NAME, force_posix=True)
     path_config = os.path.join(app_path, 'config.ini')
 
@@ -265,7 +293,8 @@ def cli(ctx, repo, python, debug):
         'REPO_PATH': repo,
         'PYTHON_PATH': python,
         'username': username,
-        'password': password
+        'password': password,
+        'CREATE_ENV': create_env
     }
 
 
@@ -337,10 +366,12 @@ def init(ctx, project_name):
                    ctx.obj['password'],
                    ctx.obj['DEBUG'])
     _create_virtualenv(ctx.obj['PYTHON_PATH'],
-                       ctx.obj['DEBUG'])
+                       ctx.obj['DEBUG'],
+                       ctx.obj['CREATE_ENV'])
     _install_packages(ctx.obj['PYTHON_PATH'],
                       ctx.obj['REPO_PATH'],
-                      ctx.obj['DEBUG'])
+                      ctx.obj['DEBUG'],
+                      ctx.obj['CREATE_ENV'])
     _download_conf(project_name,
                    ctx.obj['username'],
                    ctx.obj['password'])
