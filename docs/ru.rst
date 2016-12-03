@@ -59,9 +59,16 @@
     $ ailove devserver
 
 
+Note:
+_____
+
+Если вы указываете путь к python, с помощью `--python`, то нужно указыват родительскую
+к папке bin, т.е. если путь к python `/Library/Frameworks/Python.framework/Versions/2.7/bin/python`,
+нужно указать `/Library/Frameworks/Python.framework/Versions/2.7/`
+
 Возможные проблемы
 __________________
 
 Если стоит несколько версий Python и нужно указать путь к нужному Python, а так же создать virtualenv
 
-    $ ailove init --python=PATH_TO_PYTHON --create-env
+    $ ailove --python=PATH_TO_PYTHON --create-env init
